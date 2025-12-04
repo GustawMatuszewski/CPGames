@@ -2,7 +2,6 @@
 using UnityEngine.InputSystem;
 using System.Collections;
 
-
 public class KCC : MonoBehaviour
 {
     [Header("Debug MODE!!!")]
@@ -12,7 +11,6 @@ public class KCC : MonoBehaviour
     [SerializeField] private PlayerInput input;
     [SerializeField] private CapsuleCollider capsule;
     [SerializeField] private Transform cameraTransform;
-    //[SerializeField] private PlayerStatusController stamina;
 
     [Header("Movement Settings")]
     public float walkSpeed = 5;
@@ -39,10 +37,11 @@ public class KCC : MonoBehaviour
     public LayerMask groundMask;
     public string ledgeTag;
 
-    [Header ("Climbing Settings")]
+    [Header("Climbing Settings")]
     public float forwardCheckDistance = 1.0f;
     public float downCheckDistance = 2.0f;
     public float hangTimer = .4f;
+    public bool isClimbing = false;
 
     private Vector3 velocity;
     private bool jumpRequested = false;
@@ -51,21 +50,9 @@ public class KCC : MonoBehaviour
     public bool useGravity = true;
     public bool enableMovement = true;
     public bool enableClimbing = true;
+    public bool enableStateMachine = true;
 
-    public enum State
-    {
-        None,
-        Idle,
-        Air,
-        Walk,
-        Run,
-        Sprint,
-        Crouch,
-        Prone,
-        Climbing,
-        Hanging
-    }
-
+    public enum State { None, Idle, Air, Walk, Run, Sprint, Crouch, Prone, Climbing, Hanging }
     public State state;
 
     private void Start() {
@@ -78,13 +65,9 @@ public class KCC : MonoBehaviour
     void FixedUpdate() {
         StateController();
         capsule.height = capsuleHeight;
-
         if (useGravity) ApplyGravity();
-
         RotateWithCamera();
-
-        if(enableMovement) ApplyMovement();
-
+        if (enableMovement) ApplyMovement();
         jumpRequested = false;
     }
 
@@ -100,8 +83,8 @@ public class KCC : MonoBehaviour
     }
 
     float SlopeCheck() {
-        RaycastHit hit;
-        if (Physics.Raycast(transform.position, Vector3.down, out hit, capsuleHeight, groundMask)) return Vector3.Angle(hit.normal, Vector3.up);
+        if (Physics.Raycast(transform.position, Vector3.down, out RaycastHit hit, capsuleHeight, groundMask))
+            return Vector3.Angle(hit.normal, Vector3.up);
         return 0f;
     }
 
@@ -119,55 +102,50 @@ public class KCC : MonoBehaviour
         bool grabLedge = input.PlayerInputMap.InteractInput.ReadValue<float>() > 0;
 
         float prevHeight = capsuleHeight;
-        Vector3 ledgePosition = new Vector3(0,0,0);
+        Vector3 ledgePosition = Vector3.zero;
 
-        state = State.None;
-
-
-        if (grabLedge && enableClimbing){
-            if (DetectLedge(out ledgePosition)){
+        if (enableStateMachine) {
+            if (grabLedge && enableClimbing && !isClimbing && DetectLedge(out ledgePosition)) {
                 state = State.Climbing;
                 moveSpeed = 0;
                 capsuleHeight = standingHeight;
+                isClimbing = true;
                 StartCoroutine(ClimbOntoObject(ledgePosition));
-
             }
+
+            if (isClimbing) {
+                state = State.Climbing;
+            } else if (!isGrounded()) {
+                state = State.Air;
+            } else if (prone) {
+                state = State.Prone;
+                moveSpeed = proneSpeed;
+                capsuleHeight = proneHeight;
+            } else if (crouch) {
+                state = State.Crouch;
+                moveSpeed = crouchSpeed;
+                capsuleHeight = crouchHeight;
+            } else if (sprint && moveInput.y > 0.1f) {
+                state = State.Sprint;
+                moveSpeed = sprintSpeed;
+                capsuleHeight = standingHeight;
+            } else if (run) {
+                state = State.Run;
+                moveSpeed = runSpeed;
+                capsuleHeight = standingHeight;
+            } else if (moveInput != Vector2.zero) {
+                state = State.Walk;
+                moveSpeed = walkSpeed;
+                capsuleHeight = standingHeight;
+            } else {
+                state = State.Idle;
+                moveSpeed = 0f;
+                capsuleHeight = standingHeight;
+            }
+
+            if (!isClimbing && capsuleHeight > prevHeight)
+                transform.position += new Vector3(0, (capsuleHeight - prevHeight) / 2f, 0);
         }
-
-        if (!isGrounded()) {
-            state = State.Air;
-            return;
-        }
-
-
-        
-        if (prone) {
-            state = State.Prone;
-            moveSpeed = proneSpeed;
-            capsuleHeight = proneHeight;
-        } else if (crouch) {
-            state = State.Crouch;
-            moveSpeed = crouchSpeed;
-            capsuleHeight = crouchHeight;
-        } else if (sprint && moveInput.y > 0.1f) {
-            state = State.Sprint;
-            moveSpeed = sprintSpeed;
-            capsuleHeight = standingHeight;
-        } else if (run) {
-            state = State.Run;
-            moveSpeed = runSpeed;
-            capsuleHeight = standingHeight;
-        } else if (moveInput != Vector2.zero) {
-            state = State.Walk;
-            moveSpeed = walkSpeed;
-            capsuleHeight = standingHeight;
-        } else {
-            state = State.Idle;
-            moveSpeed = 0f;
-            capsuleHeight = standingHeight;
-        }
-
-        if (capsuleHeight > prevHeight) transform.position += new Vector3(0, (capsuleHeight - prevHeight)/2f, 0);
     }
 
     Vector3 RequestedMovement() {
@@ -201,9 +179,7 @@ public class KCC : MonoBehaviour
                 if (distance > 0f) position += remainingMovement.normalized * distance;
                 remainingMovement = Vector3.ProjectOnPlane(remainingMovement, hit.normal);
             } else {
-                if (debugMode)
-                    DebugCapsuleSweep(position, remainingMovement, halfHeight, capsuleRadius);
-
+                if (debugMode) DebugCapsuleSweep(position, remainingMovement, halfHeight, capsuleRadius);
                 position += remainingMovement;
                 break;
             }
@@ -212,112 +188,75 @@ public class KCC : MonoBehaviour
         return position;
     }
 
-
-    void DebugCapsuleSweep(Vector3 startPos, Vector3 movement, float halfHeight, float radius, float predictDistance = 5f, int steps = 10){
+    void DebugCapsuleSweep(Vector3 startPos, Vector3 movement, float halfHeight, float radius, float predictDistance = 5f, int steps = 10) {
         Vector3 extendedMovement = movement.normalized * Mathf.Max(movement.magnitude, predictDistance);
-
-        for (int s = 0; s <= steps; s++){
+        for (int s = 0; s <= steps; s++) {
             float t = s / (float)steps;
             Vector3 interpPos = Vector3.Lerp(startPos, startPos + extendedMovement, t);
             Vector3 interpBottom = interpPos + Vector3.down * halfHeight;
             Vector3 interpTop = interpPos + Vector3.up * halfHeight;
-
             Color col = Color.Lerp(Color.yellow, Color.green, t);
             DebugDrawCapsule(interpBottom, interpTop, radius, col);
         }
     }
-
-
-
 
     bool isGrounded() {
         float halfHeight = capsuleHeight / 2f - capsuleRadius;
         Vector3 bottom = transform.position + Vector3.down * halfHeight;
         Vector3 top = transform.position + Vector3.up * halfHeight;
         float checkDistance = 0.05f;
-
         return Physics.CapsuleCast(bottom, top, capsuleRadius, Vector3.down, out _, checkDistance + skinWidth, groundMask);
     }
 
-    IEnumerator ClimbOntoObject(Vector3 ledgePos){
+    IEnumerator ClimbOntoObject(Vector3 ledgePos) {
         enableMovement = false;
+        enableStateMachine = false;
+        isClimbing = true;
+        state = State.Climbing;
         yield return new WaitForSeconds(hangTimer);
         transform.position = ledgePos + new Vector3(0, capsuleHeight / 2f + 0.06f, 0);
+        enableStateMachine = true;
+        isClimbing = false;
         enableMovement = true;
     }
 
-
-    bool Hanging() {
+    bool DetectLedge(out Vector3 ledgePos) {
+        ledgePos = Vector3.zero;
+        LayerMask ledgeMask = collisionMask;
+        Vector3 origin = transform.position + Vector3.up * 1.0f;
+        if (Physics.Raycast(origin, transform.forward, out RaycastHit forwardHit, forwardCheckDistance, ledgeMask)) {
+            if (debugMode) Debug.DrawLine(origin, forwardHit.point, Color.green);
+            if (!forwardHit.collider.CompareTag(ledgeTag)) return false;
+            Vector3 downOrigin = forwardHit.point + Vector3.up * 1.5f;
+            if (Physics.Raycast(downOrigin, Vector3.down, out RaycastHit downHit, downCheckDistance, ledgeMask)) {
+                Vector3 ledgeForward = -transform.forward * 0.1f;
+                Vector3 capsuleBottom = downHit.point + Vector3.up * capsuleRadius + ledgeForward;
+                Vector3 capsuleTop = capsuleBottom + Vector3.up * (capsuleHeight - 2 * capsuleRadius);
+                if (debugMode) {
+                    Debug.DrawLine(downOrigin, downHit.point, Color.green);
+                    DebugDrawCapsule(capsuleBottom, capsuleTop, capsuleRadius, Color.blue);
+                }
+                if (!Physics.CheckCapsule(capsuleTop, capsuleBottom, capsuleRadius, ledgeMask)) {
+                    ledgePos = downHit.point;
+                    return true;
+                }
+            }
+        }
         return false;
     }
 
- bool DetectLedge(out Vector3 ledgePos)
-{
-    ledgePos = Vector3.zero;
-    LayerMask ledgeMask = collisionMask;
-
-    Vector3 origin = transform.position + Vector3.up * 1.0f;
-
-    // Forward ray
-    if (Physics.Raycast(origin, transform.forward, out RaycastHit forwardHit, forwardCheckDistance, ledgeMask))
-    {
-        if(debugMode)
-            Debug.DrawLine(origin, forwardHit.point, Color.green);
-
-        if (!forwardHit.collider.CompareTag(ledgeTag))
-            return false;
-
-        Vector3 downOrigin = forwardHit.point + Vector3.up * 1.5f;
-
-        if (Physics.Raycast(downOrigin, Vector3.down, out RaycastHit downHit, downCheckDistance, ledgeMask)){
-            Vector3 ledgeForward = -transform.forward * 0.1f;
-            Vector3 capsuleBottom = downHit.point + Vector3.up * capsuleRadius + ledgeForward;
-            Vector3 capsuleTop = capsuleBottom + Vector3.up * (capsuleHeight - 2 * capsuleRadius);
-
-            if (debugMode){
-                Debug.DrawLine(downOrigin, downHit.point, Color.green);
-                DebugDrawCapsule(capsuleBottom, capsuleTop, capsuleRadius, Color.blue);
-            }
-            if (!Physics.CheckCapsule(capsuleTop, capsuleBottom, capsuleRadius, ledgeMask)){
-                ledgePos = downHit.point;
-                return true;
-            }
+    void DebugDrawCapsule(Vector3 start, Vector3 end, float radius, Color color) {
+        int segments = 16;
+        for (int i = 0; i < segments; i++) {
+            float angle1 = (i / (float)segments) * Mathf.PI * 2;
+            float angle2 = ((i + 1) / (float)segments) * Mathf.PI * 2;
+            Vector3 offset1 = new Vector3(Mathf.Cos(angle1) * radius, 0, Mathf.Sin(angle1) * radius);
+            Vector3 offset2 = new Vector3(Mathf.Cos(angle2) * radius, 0, Mathf.Sin(angle2) * radius);
+            Debug.DrawLine(start + offset1, start + offset2, color);
+            Debug.DrawLine(end + offset1, end + offset2, color);
+            Debug.DrawLine(start + offset1, end + offset1, color);
         }
     }
 
-    return false;
-}
-
-// Helper function to draw a capsule in the Scene view
-void DebugDrawCapsule(Vector3 start, Vector3 end, float radius, Color color)
-{
-    int segments = 16;
-    for (int i = 0; i < segments; i++)
-    {
-        float angle1 = (i / (float)segments) * Mathf.PI * 2;
-        float angle2 = ((i + 1) / (float)segments) * Mathf.PI * 2;
-
-        Vector3 offset1 = new Vector3(Mathf.Cos(angle1) * radius, 0, Mathf.Sin(angle1) * radius);
-        Vector3 offset2 = new Vector3(Mathf.Cos(angle2) * radius, 0, Mathf.Sin(angle2) * radius);
-
-        Debug.DrawLine(start + offset1, start + offset2, color);
-        Debug.DrawLine(end + offset1, end + offset2, color);
-        Debug.DrawLine(start + offset1, end + offset1, color);
-    }
-}
-
-
-
-
-
-    void OnDrawGizmos() {/*
-        float halfHeight = capsuleHeight / 2f - capsuleRadius;
-        Vector3 bottom = transform.position + Vector3.down * halfHeight;
-        Vector3 top = transform.position + Vector3.up * halfHeight;
-
-        Gizmos.color = isGrounded() ? Color.green : Color.red;
-        Gizmos.DrawWireSphere(bottom, capsuleRadius);
-        Gizmos.DrawWireSphere(top, capsuleRadius);
-        */
-    }
+    void OnDrawGizmos() {}
 }
