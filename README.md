@@ -9,19 +9,19 @@ Ten branch zawiera kompletny system interfejsu użytkownika oparty na **UI Toolk
 Postępuj zgodnie z poniższymi krokami, aby poprawnie skonfigurować UI w swoim projekcie Unity:
 
 1. **Pliki projektu**: Umieść pliki znajdujące się w folderze `UI` z GitHuba bezpośrednio w swoim projekcie Unity.
-   ![Krok 1 - Lokalizacja plików](1.png)
+   ![Krok 1 - Lokalizacja plików](Guide/1.png)
 
 2. **UIDocument**: Utwórz na scenie nowy obiekt i dodaj do niego komponent **UIDocument** (możesz go nazwać dowolnie).
-   ![Krok 2 - Utworzenie UIDocument](2.png)
+   ![Krok 2 - Utworzenie UIDocument](Guide/2.png)
 
 3. **Plik źródłowy**: Do pola *Visual Tree Asset* w komponencie UIDocument przeciągnij plik `Main.uxml`.
-   ![Krok 3 - Przypisanie Main.uxml](3.png)
+   ![Krok 3 - Przypisanie Main.uxml](Guide/3.png)
 
 4. **Skrypt**: Do tego samego obiektu na scenie dodaj komponent **UI_Script**.
-   ![Krok 4 - Dodanie UI_Script](4.png)
+   ![Krok 4 - Dodanie UI_Script](Guide/4.png)
 
 5. **Powiązanie**: W inspektorze skryptu `UI_Script`, do pola wymagającego UIDocument, przeciągnij ten sam obiekt, na którym pracujesz.
-   ![Krok 5 - Finalne powiązanie](5.png)
+   ![Krok 5 - Finalne powiązanie](Guide/5.png)
 
 ---
 
